@@ -1,0 +1,57 @@
+# Copy to config.toml and edit. Any OpenAI-compatible chat endpoint works
+# (NVIDIA NIM / build.nvidia.com, vLLM, SGLang, OpenRouter, ...).
+#
+# `model` values below are PLACEHOLDERS: use the exact model ids your provider lists.
+# Prices are USD per 1M tokens and only feed the cost cap; leave 0 to disable cost tracking.
+
+[small]            # drives almost every step: fast and cheap
+model = "REPLACE_WITH_LIGHTNING_MODEL_ID"
+base_url = "https://integrate.api.nvidia.com/v1"
+api_key_env = "NVIDIA_API_KEY"
+temperature = 0.0
+max_tokens = 2048
+price_in_per_mtok = 0.0
+price_out_per_mtok = 0.0
+# extra_body = { chat_template_kwargs = { enable_thinking = false } }   # provider-specific options
+
+[big]              # consulted rarely: planning, stuck advice, final review
+model = "REPLACE_WITH_ULTRA_MODEL_ID"
+base_url = "https://integrate.api.nvidia.com/v1"
+api_key_env = "NVIDIA_API_KEY"
+temperature = 0.0
+max_tokens = 3000
+price_in_per_mtok = 0.0
+price_out_per_mtok = 0.0
+
+[limits]
+# hard caps (always end the run)
+max_steps = 80
+max_cost = 3.0
+max_wall_s = 1800
+cmd_timeout_s = 60
+max_format_errors = 3
+
+# token control
+obs_max_chars = 3000
+ctx_char_limit = 60000
+keep_last_messages = 10
+
+# big-model budget (advice + takeover steps + review, combined)
+max_big_calls = 12
+plan_at_step = 8
+takeover_steps = 3
+final_review = true
+max_review_rejections = 2
+
+# loop detection
+window = 8
+repeat_threshold = 3
+stall_warmup = 10
+stall_steps = 12
+max_strikes = 5
+
+# optional read-only explorer subagent (leave off until your baseline shows context bloat)
+enable_explorer = false
+max_explorer_calls = 3
+explorer_max_steps = 12
+explorer_max_cost = 0.10
