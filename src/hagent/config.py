@@ -27,7 +27,8 @@ class ModelConfig:
 class Limits:
     # --- hard caps: always terminate the run ---
     max_steps: int = 80
-    max_cost: float = 3.0  # USD, all models combined
+    max_cost: float = 3.0  # USD, all models combined. Only works if model prices are set!
+    max_total_tokens: int = 3_000_000  # input+output tokens over every call and model; works without prices; 0 disables
     max_wall_s: int = 1800
     cmd_timeout_s: int = 60
     max_format_errors: int = 3  # consecutive
@@ -82,6 +83,19 @@ def settings_from_dict(data: dict[str, Any]) -> Settings:
         big=_build(ModelConfig, data.get("big", {}), "big"),
         limits=_build(Limits, data.get("limits", {}), "limits"),
     )
+
+
+def pricing_warnings(settings: Settings, mode: str) -> list[str]:
+    """max_cost can only trigger if prices are configured; say so when it silently could not."""
+    if settings.limits.max_cost <= 0:
+        return []
+    used = {"hybrid": ("small", "big"), "small": ("small",), "big": ("big",)}[mode]
+    unpriced = [n for n in used
+                if not (getattr(settings, n).price_in_per_mtok or getattr(settings, n).price_out_per_mtok)]
+    if not unpriced:
+        return []
+    return [f"max_cost=${settings.limits.max_cost} cannot trigger: no prices set for model(s) {', '.join(unpriced)}. "
+            f"Set price_in_per_mtok / price_out_per_mtok; until then only max_total_tokens and max_steps protect you."]
 
 
 def load_settings(path: str | Path) -> Settings:

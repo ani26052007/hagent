@@ -76,7 +76,9 @@ class HybridAgent(Agent):
     # ------------------------------------------------------------------ observations / loop detection
     def on_observation(self, command: str, obs: Obs) -> None:
         super().on_observation(command, obs)
-        flag = self.detector.observe(command, obs.output, self.env.git_diff_hash())
+        flag = self.detector.observe(
+            command, obs.output, self.env.git_diff_hash(), self.env.git_tracked_diff_hash()
+        )
         if flag:
             self.pending_flag = flag
         elif self.detector.progress:

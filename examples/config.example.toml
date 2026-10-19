@@ -2,7 +2,8 @@
 # (NVIDIA NIM / build.nvidia.com, vLLM, SGLang, OpenRouter, ...).
 #
 # `model` values below are PLACEHOLDERS: use the exact model ids your provider lists.
-# Prices are USD per 1M tokens and only feed the cost cap; leave 0 to disable cost tracking.
+# Prices are USD per 1M tokens and only feed the max_cost cap. With prices left at 0, max_cost
+# CANNOT trigger (the CLI warns about it); max_total_tokens below still protects you.
 
 [small]            # drives almost every step: fast and cheap
 model = "REPLACE_WITH_LIGHTNING_MODEL_ID"
@@ -27,6 +28,7 @@ price_out_per_mtok = 0.0
 # hard caps (always end the run)
 max_steps = 80
 max_cost = 3.0
+max_total_tokens = 3000000   # input+output tokens, all calls and models; works without prices
 max_wall_s = 1800
 cmd_timeout_s = 60
 max_format_errors = 3

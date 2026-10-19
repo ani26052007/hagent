@@ -244,3 +244,19 @@ def test_explorer_budget(repo, mk_settings):
     agent = HybridAgent(small, ScriptedModel([advisor_or_bash()]), LocalEnv(repo), s)
     agent.run("x")
     assert "budget exhausted" in small.calls[1][-1]["content"]
+
+
+# ================================================================ fixes: oscillation noise, token cap
+def test_hybrid_scratch_repro_file_workflow_is_not_flagged(repo, mk_settings):
+    small = ScriptedModel([bash("ls"), bash("echo 'print(1)' > repro.py"), bash("python repro.py"), bash("rm repro.py"),
+                           bash("echo done"), SUBMIT])
+    agent = HybridAgent(small, ScriptedModel([advisor_or_bash()]), LocalEnv(repo), mk_settings())
+    r = agent.run("x")
+    assert r.submitted and agent.strikes == 0
+    assert not any("Loop guard" in m["content"] for call in small.calls for m in call)
+
+
+def test_token_limit_stops_run(repo, mk_settings):
+    model = ScriptedModel([bash("echo x")], repeat_last=True)
+    r = Agent(model, LocalEnv(repo), mk_settings(max_steps=100, max_total_tokens=1500)).run("x")
+    assert r.exit_status == "LimitsExceeded" and "token limit" in r.detail and r.steps < 100

@@ -119,6 +119,10 @@ class Agent:
     def total_cost(self) -> float:
         return sum(u.cost for u in self.usage.values())
 
+    @property
+    def total_tokens(self) -> int:
+        return sum(u.input_tokens + u.output_tokens for u in self.usage.values())
+
     # ------------------------------------------------------------------ hooks (HybridAgent overrides)
     def active(self) -> tuple[str, Model]:
         """Which model answers the next step."""
@@ -214,6 +218,8 @@ class Agent:
             raise AgentExit("LimitsExceeded", f"step limit {lim.max_steps} reached")
         if 0 < lim.max_cost <= self.total_cost:
             raise AgentExit("LimitsExceeded", f"cost limit ${lim.max_cost} reached")
+        if 0 < lim.max_total_tokens <= self.total_tokens:
+            raise AgentExit("LimitsExceeded", f"token limit {lim.max_total_tokens} reached")
         if 0 < lim.max_wall_s <= time.time() - self._t0:
             raise AgentExit("TimeExceeded", f"wall-clock limit {lim.max_wall_s}s reached")
 

@@ -103,3 +103,17 @@ class LocalEnv:
 
     def git_diff_hash(self) -> str:
         return hashlib.sha1(self.git_diff().encode("utf-8", "replace")).hexdigest()[:12]
+
+    def git_tracked_diff_hash(self) -> str:
+        """Hash of edits to files git already tracks (modified/deleted only).
+
+        New untracked files, such as a throwaway repro script, do not change it. The loop detector
+        uses this for oscillation, so creating and deleting a scratch file is not mistaken for an
+        edit being undone."""
+        if not self.is_git_repo():
+            return ""
+        flags = ["--no-renames", "--diff-filter=MDT"]
+        rc, out = self._git("diff", "HEAD", *flags)
+        if rc != 0:  # repository without commits
+            rc, out = self._git("diff", *flags)
+        return hashlib.sha1(out.encode("utf-8", "replace")).hexdigest()[:12] if rc == 0 else ""

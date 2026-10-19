@@ -89,6 +89,9 @@ class OpenAICompatModel:
         usage = payload.get("usage") or {}
         tin = int(usage.get("prompt_tokens") or 0)
         tout = int(usage.get("completion_tokens") or 0)
+        if not (tin or tout):  # provider sent no usage block: estimate (~4 chars/token) so token caps still work
+            tin = sum(len(str(m.get("content", ""))) for m in messages) // 4
+            tout = len(content) // 4
         cost = tin * cfg.price_in_per_mtok / 1e6 + tout * cfg.price_out_per_mtok / 1e6
         return Reply(content, tin, tout, cost)
 

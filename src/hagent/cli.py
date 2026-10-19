@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .config import Settings, load_settings
+from .config import Settings, load_settings, pricing_warnings
 from .exceptions import HAgentError
 from .runner import MODES, solve
 
@@ -50,6 +50,8 @@ def main(argv: list[str] | None = None) -> int:
         _init_git(repo)
     task = Path(args.task_file).read_text() if args.task_file else args.task
     settings = load_settings(args.config) if args.config else Settings()
+    for warning in pricing_warnings(settings, args.mode):
+        print(f"warning: {warning}", file=sys.stderr)
 
     try:
         result = solve(task, repo, settings, args.mode, trajectory_path=args.trajectory)

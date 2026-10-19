@@ -27,12 +27,18 @@ class LoopDetector:
         self.step = 0
         self.last_progress_step = 0
         self.seen_diffs: set[str] = set()
+        self.seen_tracked: set[str] = set()  # states of tracked files only (see git_tracked_diff_hash)
+        self.last_tracked: str | None = None
         self.seen_sigs: set[str] = set()
         self.last_diff: str | None = None
         self.progress = False  # True if the latest observation was genuinely new
 
-    def observe(self, command: str, output: str, diff_hash: str) -> str | None:
-        """Record one executed command. Returns a human-readable flag reason, or None."""
+    def observe(self, command: str, output: str, diff_hash: str, tracked_hash: str | None = None) -> str | None:
+        """Record one executed command. Returns a human-readable flag reason, or None.
+
+        diff_hash is the full repo state (new files included) and drives repeat/progress detection.
+        tracked_hash covers edits to already-tracked files only and drives oscillation detection;
+        when omitted it falls back to diff_hash."""
         self.step += 1
         cmd_key = (normalize_cmd(command), diff_hash)
         out_key = (short_hash(output), diff_hash)
@@ -40,7 +46,8 @@ class LoopDetector:
 
         sig = failure_signature(output)
         novel_diff = diff_hash not in self.seen_diffs
-        revisit = (not novel_diff) and diff_hash != self.last_diff
+        tracked = diff_hash if tracked_hash is None else tracked_hash
+        revisit = tracked in self.seen_tracked and tracked != self.last_tracked
         novel_sig = sig is not None and sig not in self.seen_sigs
 
         self.progress = novel_diff or novel_sig
@@ -50,6 +57,8 @@ class LoopDetector:
         if sig is not None:
             self.seen_sigs.add(sig)
         self.last_diff = diff_hash
+        self.seen_tracked.add(tracked)
+        self.last_tracked = tracked
 
         n_cmd = sum(1 for c, _ in self.window if c == cmd_key)
         if n_cmd >= self.repeat_threshold:

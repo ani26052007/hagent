@@ -302,3 +302,54 @@ def test_scripted_model_exhaustion_and_repeat():
         m.query([{"role": "user", "content": "x"}])
     r = ScriptedModel(["a"], repeat_last=True)
     assert [r.query([{"role": "user", "content": "x"}]).content for _ in range(3)] == ["a"] * 3
+
+
+# ---------------------------------------------------------------- fixes: oscillation noise, cost cap
+def test_detector_scratch_file_create_and_delete_is_not_oscillation():
+    d = LoopDetector()
+    flags = [
+        d.observe("ls", "app.py", "EMPTY", "T0"),
+        d.observe("echo 'print(1)' > repro.py", "", "WITH_REPRO", "T0"),
+        d.observe("python repro.py", "1", "WITH_REPRO", "T0"),
+        d.observe("rm repro.py", "", "EMPTY", "T0"),
+    ]
+    assert flags == [None, None, None, None]
+
+
+def test_detector_oscillation_in_tracked_files_is_still_caught():
+    d = LoopDetector()
+    assert d.observe("edit1", "ok", "F1", "A") is None
+    assert d.observe("edit2", "ok", "F2", "B") is None
+    assert d.observe("edit3", "ok", "F3", "A").startswith("oscillation")
+
+
+def test_env_tracked_hash_ignores_new_files_but_sees_edits(repo):
+    env = LocalEnv(repo)
+    h0 = env.git_tracked_diff_hash()
+    env.execute("echo 'print(1)' > repro.py")
+    env.git_diff()  # registers the new file (intent-to-add), as the agent does every step
+    assert env.git_tracked_diff_hash() == h0
+    env.execute("sed -i 's/a - b/a + b/' app.py")
+    assert env.git_tracked_diff_hash() != h0
+    env.execute("git checkout -- app.py")
+    assert env.git_tracked_diff_hash() == h0
+
+
+def test_pricing_warnings():
+    from hagent.config import Settings, pricing_warnings
+
+    s = Settings()  # default max_cost=3.0 and no prices
+    assert "model(s) small." in pricing_warnings(s, "small")[0]
+    assert "model(s) small, big." in pricing_warnings(s, "hybrid")[0]
+    s.small.price_in_per_mtok = s.big.price_out_per_mtok = 1.0
+    assert pricing_warnings(s, "hybrid") == []
+    s.limits.max_cost = 0
+    s.small.price_in_per_mtok = 0
+    assert pricing_warnings(s, "hybrid") == []  # no cost cap, nothing to warn about
+
+
+def test_openai_model_estimates_tokens_when_usage_missing(server):
+    m = OpenAICompatModel(ModelConfig(model="m", base_url=server, api_key_env=""))
+    _Handler.responses = [(200, {"choices": [{"message": {"content": "x" * 400}}]})]
+    r = m.query([{"role": "user", "content": "y" * 4000}])
+    assert r.input_tokens == 1000 and r.output_tokens == 100
