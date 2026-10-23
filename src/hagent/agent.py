@@ -20,7 +20,7 @@ from .compaction import maybe_compact
 from .config import Settings
 from .env import Obs
 from .exceptions import AgentExit, FormatError, ModelError
-from .models import Model, Reply
+from .models import USAGE_API, Model, Reply
 from .prompts import FORMAT_ERROR, TASK_TEMPLATE, build_system_prompt
 from .textutil import parse_action, truncate_middle
 
@@ -31,10 +31,17 @@ TEST_CMD_RE = re.compile(
 
 @dataclass
 class Usage:
+    """Per-role totals. Token counts are provider-reported where available; `estimated_calls`
+    counts calls whose tokens were (fully or partly) estimated from characters.
+    `pass_probabilities` holds the reviewer's logged pass probability per review this role
+    performed (None when the reviewer gave none). It is logged only and gates nothing."""
+
     calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
     cost: float = 0.0
+    estimated_calls: int = 0
+    pass_probabilities: list[float | None] = field(default_factory=list)
 
 
 @dataclass
@@ -47,6 +54,7 @@ class RunResult:
     total_cost: float
     usage: dict[str, Usage] = field(default_factory=dict)
     messages: list[dict] = field(default_factory=list)
+    reviews: list[dict] = field(default_factory=list)  # reviewer log (verdict, pass probability); never gates
 
     @property
     def submitted(self) -> bool:
@@ -73,7 +81,9 @@ class Agent:
         self.settings = settings
         self.limits = settings.limits
         self.role = role
-        self.system_prompt = system_prompt or build_system_prompt(env.cwd)
+        self.system_prompt = system_prompt or build_system_prompt(env.cwd, commands=settings.commands)
+        self._cmd_limits = [(re.compile(rf"(?:^|[\s;&|(`]){re.escape(c.name)}(?=$|[\s;&|)`])"), c.max_output_chars)
+                            for c in settings.commands if c.max_output_chars > 0]
         self.trajectory_path = Path(trajectory_path) if trajectory_path else None
 
         self.log = logging.getLogger("hagent")
@@ -106,6 +116,8 @@ class Agent:
         u.input_tokens += reply.input_tokens
         u.output_tokens += reply.output_tokens
         u.cost += reply.cost
+        if getattr(reply, "usage_source", USAGE_API) != USAGE_API:
+            u.estimated_calls += 1
 
     def merge_usage(self, role: str, other: dict[str, Usage]) -> None:
         u = self.usage.setdefault(role, Usage())
@@ -114,6 +126,8 @@ class Agent:
             u.input_tokens += v.input_tokens
             u.output_tokens += v.output_tokens
             u.cost += v.cost
+            u.estimated_calls += v.estimated_calls
+            u.pass_probabilities.extend(v.pass_probabilities)
 
     @property
     def total_cost(self) -> float:
@@ -144,6 +158,16 @@ class Agent:
     def handle_submission(self, submission: str) -> str | None:
         """Return None to accept the submission, or feedback text to reject it."""
         return None
+
+    def observation_limit(self, command: str) -> int:
+        """Characters of a command's output shown to the model: limits.obs_max_chars, unless the
+        command calls custom commands with their own limit (then the largest of those)."""
+        own = [limit for pattern, limit in self._cmd_limits if pattern.search(command)]
+        return max(own) if own else self.limits.obs_max_chars
+
+    def review_log(self) -> list[dict]:
+        """Records of final reviews, saved in the trajectory and RunResult (logging only)."""
+        return []
 
     # ------------------------------------------------------------------ the loop
     def run(self, task: str) -> RunResult:
@@ -180,6 +204,7 @@ class Agent:
             total_cost=round(self.total_cost, 6),
             usage=dict(self.usage),
             messages=self.messages,
+            reviews=list(self.review_log()),
         )
         self._save(result)
         return result
@@ -188,7 +213,7 @@ class Agent:
         reply = self.query()
         command = parse_action(reply.content)  # raises FormatError
         obs = self.run_command(command)
-        self.add("user", format_observation(obs, self.limits.obs_max_chars))
+        self.add("user", format_observation(obs, self.observation_limit(command)))
         if obs.submission is not None:
             feedback = self.handle_submission(obs.submission)
             if feedback is None:
@@ -246,6 +271,7 @@ class Agent:
             "messages": self.messages,
             "usage": {k: asdict(v) for k, v in self.usage.items()},
             "steps": self.n_steps,
+            "reviews": self.review_log(),
         }
         if result is not None:
             data["exit_status"] = result.exit_status

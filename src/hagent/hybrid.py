@@ -18,7 +18,7 @@ from __future__ import annotations
 import shlex
 
 from . import helpers
-from .agent import Agent
+from .agent import Agent, Usage
 from .compaction import split_summary
 from .config import Settings
 from .detector import LoopDetector
@@ -33,7 +33,7 @@ class HybridAgent(Agent):
     def __init__(self, small: Model, big: Model, env, settings: Settings, **kw):
         lim = settings.limits
         prompt = kw.pop("system_prompt", None) or build_system_prompt(
-            env.cwd, lim.max_explorer_calls if lim.enable_explorer else 0
+            env.cwd, lim.max_explorer_calls if lim.enable_explorer else 0, settings.commands
         )
         super().__init__(small, env, settings, role="small", system_prompt=prompt, **kw)
         self.big = big
@@ -45,6 +45,7 @@ class HybridAgent(Agent):
         self.pending_flag: str | None = None
         self.review_rejections = 0
         self.explorer_calls = 0
+        self.reviews: list[dict] = []
 
     # ------------------------------------------------------------------ big-model budget
     def big_available(self, for_review: bool = False) -> bool:
@@ -150,10 +151,24 @@ class HybridAgent(Agent):
             return None
         self.account("big", reply)
         self.big_calls += 1
+        self._log_review(verdict)
         if verdict.ok:
             return None
         self.review_rejections += 1
         return f"[Reviewer rejected your submission]\n{verdict.feedback}\nFix these issues, re-verify, then submit again."
+
+    def _log_review(self, verdict) -> None:
+        """Record the review. The pass probability is logged only; it never affects the outcome."""
+        self.usage.setdefault("big", Usage()).pass_probabilities.append(verdict.pass_probability)
+        self.reviews.append({
+            "step": self.n_steps,
+            "verdict": "APPROVE" if verdict.ok else "REJECT",
+            "pass_probability": verdict.pass_probability,
+            "diff_hash": self.env.git_diff_hash(),
+        })
+
+    def review_log(self) -> list[dict]:
+        return self.reviews
 
     # ------------------------------------------------------------------ explorer
     def run_command(self, command: str) -> Obs:

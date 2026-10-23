@@ -4,11 +4,19 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shlex
+import shutil
 import signal
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Protocol, Sequence
 
+if TYPE_CHECKING:
+    from .config import CustomCommand
+
+from .exceptions import EnvError
 from .textutil import truncate_middle
 
 # Same convention as mini-swe-agent: if the *first line* of a successful command's output is
@@ -33,8 +41,87 @@ class Obs:
     submission: str | None = None  # set when the command output started with SUBMIT_MARKER
 
 
-class LocalEnv:
-    """Runs commands with bash in `cwd`. POSIX only (process groups are used for timeouts)."""
+class Env(Protocol):
+    """What the agent needs from an execution environment.
+
+    Contract:
+      execute(command, timeout_s)  run `command` with bash in `cwd` as an independent process
+                                   (no state survives between calls), stdin closed, stdout+stderr
+                                   merged and truncated to the env's max_output_chars; on timeout
+                                   the whole process tree is killed and Obs(timed_out=True,
+                                   returncode=-1) is returned. Never raises for command failures.
+      cwd                          the repo path as seen by the commands.
+      git_diff()                   everything changed vs HEAD, including new files ("" if no repo).
+      git_diff_hash()              short hash of git_diff().
+      git_tracked_diff_hash()      short hash of edits to tracked files only.
+      install_commands(cmds)       make each custom command callable by name; raises EnvError if a
+                                   command's path is not executable in this env.
+      close()                      release resources; idempotent.
+    """
+
+    cwd: str
+
+    def execute(self, command: str, timeout_s: int | None = None) -> Obs: ...
+    def git_diff(self) -> str: ...
+    def git_diff_hash(self) -> str: ...
+    def git_tracked_diff_hash(self) -> str: ...
+    def install_commands(self, commands: Sequence[CustomCommand]) -> None: ...
+    def close(self) -> None: ...
+
+
+def submission_of(output: str, returncode: int) -> str | None:
+    """The submission text if `output` starts with SUBMIT_MARKER and the command succeeded."""
+    lines = output.lstrip().splitlines(keepends=True)
+    if returncode == 0 and lines and lines[0].strip() == SUBMIT_MARKER:
+        return "".join(lines[1:])
+    return None
+
+
+def shim_script(path: str) -> str:
+    """A tiny bash wrapper that forwards all arguments to `path`."""
+    return f"#!/bin/bash\nexec {shlex.quote(path)} \"$@\"\n"
+
+
+class GitHelpers:
+    """git-based helpers shared by all envs. Subclasses implement `_git(*args, timeout)`
+    returning (returncode, stdout) and must not raise."""
+
+    def _git(self, *args: str, timeout: int = 30) -> tuple[int, str]:  # pragma: no cover - abstract
+        raise NotImplementedError
+
+    def is_git_repo(self) -> bool:
+        return self._git("rev-parse", "--is-inside-work-tree")[0] == 0
+
+    def git_diff(self) -> str:
+        """Everything changed relative to HEAD, including new files (via intent-to-add)."""
+        if not self.is_git_repo():
+            return ""
+        self._git("add", "-A", "-N")
+        rc, out = self._git("diff", "HEAD")
+        if rc != 0:  # repository without commits
+            rc, out = self._git("diff")
+        return out if rc == 0 else ""
+
+    def git_diff_hash(self) -> str:
+        return hashlib.sha1(self.git_diff().encode("utf-8", "replace")).hexdigest()[:12]
+
+    def git_tracked_diff_hash(self) -> str:
+        """Hash of edits to files git already tracks (modified/deleted only).
+
+        New untracked files, such as a throwaway repro script, do not change it. The loop detector
+        uses this for oscillation, so creating and deleting a scratch file is not mistaken for an
+        edit being undone."""
+        if not self.is_git_repo():
+            return ""
+        flags = ["--no-renames", "--diff-filter=MDT"]
+        rc, out = self._git("diff", "HEAD", *flags)
+        if rc != 0:  # repository without commits
+            rc, out = self._git("diff", *flags)
+        return hashlib.sha1(out.encode("utf-8", "replace")).hexdigest()[:12] if rc == 0 else ""
+
+
+class LocalEnv(GitHelpers):
+    """Runs commands with bash in `cwd` on the host. POSIX only (process groups are used for timeouts)."""
 
     def __init__(self, cwd: str | Path, timeout_s: int = 60, extra_env: dict[str, str] | None = None,
                  max_output_chars: int = 200_000):
@@ -42,6 +129,7 @@ class LocalEnv:
         self.timeout_s = timeout_s
         self.extra_env = extra_env or {}
         self.max_output_chars = max_output_chars
+        self._shim_dir: str | None = None
 
     # ----- command execution -----
     def execute(self, command: str, timeout_s: int | None = None) -> Obs:
@@ -74,10 +162,30 @@ class LocalEnv:
 
     @staticmethod
     def _submission(output: str, returncode: int) -> str | None:
-        lines = output.lstrip().splitlines(keepends=True)
-        if returncode == 0 and lines and lines[0].strip() == SUBMIT_MARKER:
-            return "".join(lines[1:])
-        return None
+        return submission_of(output, returncode)
+
+    # ----- custom commands / lifecycle -----
+    def install_commands(self, commands: Sequence[CustomCommand]) -> None:
+        """Put a shim per command in a private temp dir and prepend it to PATH."""
+        if not commands:
+            return
+        for c in commands:
+            if not (os.path.isfile(c.path) and os.access(c.path, os.X_OK)):
+                raise EnvError(f"custom command {c.name!r}: {c.path} is not an executable file")
+        if self._shim_dir is None:
+            self._shim_dir = tempfile.mkdtemp(prefix="hagent-cmds-")
+        for c in commands:
+            shim = Path(self._shim_dir) / c.name
+            shim.write_text(shim_script(c.path))
+            shim.chmod(0o755)
+        base_path = self.extra_env.get("PATH") or os.environ.get("PATH", "")
+        if not base_path.startswith(self._shim_dir + os.pathsep):
+            self.extra_env["PATH"] = self._shim_dir + os.pathsep + base_path
+
+    def close(self) -> None:
+        if self._shim_dir:
+            shutil.rmtree(self._shim_dir, ignore_errors=True)
+            self._shim_dir = None
 
     # ----- git helpers (used by the loop detector, reviewer and final result) -----
     def _git(self, *args: str, timeout: int = 30) -> tuple[int, str]:
@@ -87,33 +195,3 @@ class LocalEnv:
         except (OSError, subprocess.TimeoutExpired):
             return 1, ""
         return p.returncode, p.stdout
-
-    def is_git_repo(self) -> bool:
-        return self._git("rev-parse", "--is-inside-work-tree")[0] == 0
-
-    def git_diff(self) -> str:
-        """Everything changed relative to HEAD, including new files (via intent-to-add)."""
-        if not self.is_git_repo():
-            return ""
-        self._git("add", "-A", "-N")
-        rc, out = self._git("diff", "HEAD")
-        if rc != 0:  # repository without commits
-            rc, out = self._git("diff")
-        return out if rc == 0 else ""
-
-    def git_diff_hash(self) -> str:
-        return hashlib.sha1(self.git_diff().encode("utf-8", "replace")).hexdigest()[:12]
-
-    def git_tracked_diff_hash(self) -> str:
-        """Hash of edits to files git already tracks (modified/deleted only).
-
-        New untracked files, such as a throwaway repro script, do not change it. The loop detector
-        uses this for oscillation, so creating and deleting a scratch file is not mistaken for an
-        edit being undone."""
-        if not self.is_git_repo():
-            return ""
-        flags = ["--no-renames", "--diff-filter=MDT"]
-        rc, out = self._git("diff", "HEAD", *flags)
-        if rc != 0:  # repository without commits
-            rc, out = self._git("diff", *flags)
-        return hashlib.sha1(out.encode("utf-8", "replace")).hexdigest()[:12] if rc == 0 else ""

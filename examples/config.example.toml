@@ -57,3 +57,27 @@ enable_explorer = false
 max_explorer_calls = 3
 explorer_max_steps = 12
 explorer_max_cost = 0.10
+
+# where commands run. "local" = on the host, in the repo itself.
+# "docker" = in a container holding a COPY of the repo (original never modified).
+[env]
+backend = "local"
+runtime = "docker"          # or "podman"
+image = ""                  # e.g. "hagent-sandbox" built from examples/docker/Dockerfile
+network = "none"
+cpus = 2.0
+memory = "4g"
+pids_limit = 512
+workdir = "/workspace/repo"
+user = ""                   # e.g. "agent"
+kill_grace_s = 10
+startup_timeout_s = 120
+
+# extra commands offered to the agent (listed in its system prompt). `path` must be executable
+# in the execution environment (inside the container for the docker backend).
+# max_output_chars overrides obs_max_chars for output of commands that call it (0 = default).
+# [[commands]]
+# name = "run_rung1"
+# path = "/opt/tools/run_rung1"
+# description = "Run staged simulator validation. Usage: run_rung1 --seeds N. Prints pass rate, CI, top error mode."
+# max_output_chars = 2000

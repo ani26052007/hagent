@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .agent import Agent, RunResult
 from .config import Settings
-from .env import LocalEnv
+from .env import Env, LocalEnv
 from .hybrid import HybridAgent
 from .models import Model, OpenAICompatModel
 
@@ -22,6 +22,7 @@ def solve(
     small: Model | None = None,
     big: Model | None = None,
     trajectory_path: str | Path | None = None,
+    env: Env | None = None,
 ) -> RunResult:
     """Run the agent on `repo`.
 
@@ -31,10 +32,31 @@ def solve(
 
     Pass `small=` / `big=` to inject your own Model objects (tests, other providers);
     otherwise they are built from `settings`.
+    Pass `env=` to use your own environment (you then own its lifecycle); otherwise one is built
+    from `settings.env` and closed when the run ends. Custom commands are installed either way.
     """
     if mode not in MODES:
         raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
-    env = LocalEnv(repo, timeout_s=settings.limits.cmd_timeout_s)
+    owned = env is None
+    env = env or make_env(repo, settings)
+    try:
+        env.install_commands(settings.commands)
+        return _run(task, settings, mode, env, small, big, trajectory_path)
+    finally:
+        if owned:
+            env.close()
+
+
+def make_env(repo: str | Path, settings: Settings) -> Env:
+    """Build the execution environment selected by settings.env.backend."""
+    if settings.env.backend == "docker":
+        from .docker_env import DockerEnv
+        return DockerEnv(repo, settings.env, timeout_s=settings.limits.cmd_timeout_s)
+    return LocalEnv(repo, timeout_s=settings.limits.cmd_timeout_s)
+
+
+def _run(task: str, settings: Settings, mode: str, env: Env, small: Model | None, big: Model | None,
+         trajectory_path: str | Path | None) -> RunResult:
     if mode == "hybrid":
         small = small or OpenAICompatModel(settings.small, "small")
         big = big or OpenAICompatModel(settings.big, "big")

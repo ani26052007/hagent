@@ -84,6 +84,12 @@ The big model always sees a digest: task, the agent's notes, the last 6 messages
 - Big-model calls are capped by `max_big_calls`, with one call reserved for the final review.
 - `<think>...</think>` blocks in replies are stripped before they enter the history.
 
+### Repair-incident extras
+
+- **Reviewer pass probability.** The reviewer replies `APPROVE`/`REJECT` and then `PASS_PROBABILITY: <0-1>`. The probability is logged in `RunResult.reviews`, the trajectory's `reviews`, and `usage["big"].pass_probabilities`. It never gates anything; a missing or garbled value is logged as `null`.
+- **Task templates.** `load_task_template(path).render(IncidentContext(...))` builds the task text from `<<TASK>>`, `<<ROUTER_VERDICT>>`, `<<LOCATION_EVIDENCE>>`, `<<REPRO_COMMAND>>`, `<<ROLLOUT_SUMMARY>>`, `<<REPO_PATH>>`. The default (`examples/task_template.md`) frames the router verdict as a hypothesis to verify first.
+- **Custom commands.** `[[commands]]` entries (`name`, `path`, `description`, `max_output_chars`) are listed in the system prompt and put on PATH via shims; output of a command that calls one uses that command's truncation limit.
+
 ## Benchmarking (do this before tuning)
 
 Run the same tasks with `--mode small`, `--mode big` and `--mode hybrid`, then compare resolve rate vs cost using the `usage` field / `--trajectory` JSON.
@@ -91,13 +97,13 @@ Only keep a component (planning consult, review, explorer) if it moves that curv
 
 ## Known limitations and caveats
 
-- **The agent runs arbitrary bash.** Run it in a container or throwaway VM for anything you do not fully trust. A Docker/Podman environment is the natural next step: implement the same `execute(command, timeout_s) -> Obs` plus `cwd`, `git_diff()`, `git_diff_hash()` and pass it in.
+- **The agent runs arbitrary bash.** Use the container backend for anything you do not fully trust: `[env] backend = "docker"` (or `runtime = "podman"`) runs every command in a container holding a *copy* of the repo, with no network and CPU/memory/pid limits by default. Timeouts kill the whole process tree, including children that left the process group. The image needs bash, git and coreutils (`examples/docker/Dockerfile`). The copy includes `.git`, so history is visible to the agent; hiding it is the caller's job.
 - POSIX only (process groups, `/bin/bash`). The working dir should be a git repo with a sensible `.gitignore`; the detector and reviewer rely on `git diff`.
 - The explorer's read-only guard is a best-effort filter (it can false-positive on `>` inside quoted code, and cannot see writes made by scripts). It reports it if the repo changed. Real isolation needs a read-only mount.
-- Budgets are in characters (about 4 per token), not exact tokens. Costs are only as accurate as the prices you configure; with prices at 0 the cost cap never triggers.
+- Token counts and the cost cap use the provider's `usage` block (`prompt_tokens`/`completion_tokens`, or `input_tokens`/`output_tokens`, or one side plus `total_tokens`). Only when it is missing are tokens estimated at ~4 characters per token; `Usage.estimated_calls` counts those calls. History budgets (`ctx_char_limit`, `obs_max_chars`) are still in characters. Costs are only as accurate as the prices you configure; with prices at 0 the cost cap never triggers.
 - Each compaction rewrites the task message, which invalidates provider prefix caching once per compaction.
 - Model ids in the example config are placeholders. I have not verified the Nemotron model names, context sizes or pricing; check your provider.
-- Tested with scripted models and a fake HTTP server (77 tests); it has not been run against a live model or on SWE-bench yet.
+- Tested with scripted models, a fake HTTP server and a local Docker daemon (157 tests; container tests skip without Docker); it has not been run against a live model or on SWE-bench yet.
 
 ## Tests
 

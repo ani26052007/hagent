@@ -15,6 +15,10 @@ class ModelError(HAgentError):
     """The model API failed (after retries) or returned something unusable."""
 
 
+class EnvError(HAgentError):
+    """The execution environment could not be set up (container start, repo copy, missing tool)."""
+
+
 class AgentExit(HAgentError):
     """Raised to end the run. `status` becomes RunResult.exit_status.
 

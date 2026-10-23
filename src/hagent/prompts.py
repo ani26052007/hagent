@@ -36,11 +36,17 @@ echo <<MARKER>> && git add -A && git diff --cached
 ```
 
 The first line of its output must be the marker. Do not submit before you have run the relevant tests.
-<<EXPLORER>>"""
+<<EXPLORER>><<COMMANDS>>"""
 
 EXPLORER_NOTE = """
 ## Asking for help exploring
 For broad questions about a large codebase, run `ask_explorer "your question"` (at most <<N>> times). A read-only helper investigates and returns a short answer. Prefer it over grepping repeatedly.
+"""
+
+COMMANDS_NOTE = """
+## Extra commands
+These project commands are on PATH. Run them like any other command, one per bash block:
+<<LIST>>
 """
 
 TASK_TEMPLATE = """Solve the following task in the repository at <<CWD>>.
@@ -77,7 +83,7 @@ REVIEWER_SYSTEM = """You are a strict code reviewer. You are given a task, the f
 
 Check: (a) does the diff actually address the task, at the root cause; (b) is it minimal, with no debug prints, stray files or unrelated edits; (c) is there evidence that relevant tests passed.
 
-The FIRST line of your reply must be exactly `APPROVE` or `REJECT`. If you reject, follow with at most 150 words listing the concrete problems and what to fix. Be willing to approve a good-enough patch; do not reject over style."""
+The FIRST line of your reply must be exactly `APPROVE` or `REJECT`. The SECOND line must be `PASS_PROBABILITY: <p>`, where p is a number from 0 to 1: your estimate that this patch makes the task succeed when validated for real. If you reject, follow with at most 150 words listing the concrete problems and what to fix. Be willing to approve a good-enough patch; do not reject over style."""
 
 COMPACTOR_SYSTEM = """You compress the working history of a coding agent into notes the agent will rely on instead of the full history. Write at most 300 words of plain facts:
 - files examined and what was learned (keep exact paths, function names, error messages);
@@ -104,11 +110,20 @@ EOF
 CONSULT_HEADER = "[Senior engineer advice - <<REASON>>]"
 
 
-def build_system_prompt(cwd: str, explorer_calls: int = 0) -> str:
+def commands_note(commands) -> str:
+    """System-prompt section listing custom commands (empty string when there are none)."""
+    if not commands:
+        return ""
+    lines = [f"- `{c.name}`: {' '.join(c.description.split())}" for c in commands]
+    return COMMANDS_NOTE.replace("<<LIST>>", "\n".join(lines))
+
+
+def build_system_prompt(cwd: str, explorer_calls: int = 0, commands=()) -> str:
     note = EXPLORER_NOTE.replace("<<N>>", str(explorer_calls)) if explorer_calls > 0 else ""
     return (SYSTEM_PROMPT.replace("<<CWD>>", cwd)
             .replace("<<MARKER>>", SUBMIT_MARKER)
-            .replace("<<EXPLORER>>", note))
+            .replace("<<EXPLORER>>", note)
+            .replace("<<COMMANDS>>", commands_note(commands)))
 
 
 def build_explorer_prompt(cwd: str) -> str:
