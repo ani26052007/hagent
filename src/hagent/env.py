@@ -58,7 +58,9 @@ class Env(Protocol):
                                    the whole process tree is killed and Obs(timed_out=True,
                                    returncode=-1) is returned. Never raises for command failures.
       cwd                          the repo path as seen by the commands.
-      git_diff()                   everything changed vs HEAD, including new files ("" if no repo).
+      git_diff()                   everything changed since the commit the env started at (HEAD when it
+                                   was created), including new files and the agent's own commits ("" if
+                                   no repo).
       git_diff_hash()              short hash of git_diff().
       git_tracked_diff_hash()      short hash of edits to tracked files only.
       install_commands(cmds)       make each custom command callable by name; raises EnvError if a
@@ -91,7 +93,18 @@ def shim_script(path: str) -> str:
 
 class GitHelpers:
     """git-based helpers shared by all envs. Subclasses implement `_git(*args, timeout)`
-    returning (returncode, stdout) and must not raise."""
+    returning (returncode, stdout) and must not raise.
+
+    The patch is the change since the commit the run started from (``record_start``, called when
+    the env is created), not since the current HEAD: an agent that runs ``git commit`` keeps its
+    change in the patch (vla-router ISSUES #56)."""
+
+    _start_commit: str | None = None  # commit id recorded at creation; None: no commits yet
+
+    def record_start(self) -> None:
+        """Remember the commit the working copy is at now. Called once by the env's constructor."""
+        rc, out = self._git("rev-parse", "--verify", "-q", "HEAD^{commit}")
+        self._start_commit = out.strip() or None if rc == 0 else None
 
     def _git(self, *args: str, timeout: int = 30) -> tuple[int, str]:  # pragma: no cover - abstract
         raise NotImplementedError
@@ -100,11 +113,12 @@ class GitHelpers:
         return self._git("rev-parse", "--is-inside-work-tree")[0] == 0
 
     def git_diff(self) -> str:
-        """Everything changed relative to HEAD, including new files (via intent-to-add)."""
+        """Everything changed since the starting commit, including new files (via intent-to-add)
+        and commits the agent made."""
         if not self.is_git_repo():
             return ""
         self._git("add", "-A", "-N")
-        rc, out = self._git("diff", "HEAD")
+        rc, out = self._git("diff", self._start_commit or "HEAD")
         if rc != 0:  # repository without commits
             rc, out = self._git("diff")
         return out if rc == 0 else ""
@@ -121,7 +135,7 @@ class GitHelpers:
         if not self.is_git_repo():
             return ""
         flags = ["--no-renames", "--diff-filter=MDT"]
-        rc, out = self._git("diff", "HEAD", *flags)
+        rc, out = self._git("diff", self._start_commit or "HEAD", *flags)
         if rc != 0:  # repository without commits
             rc, out = self._git("diff", *flags)
         return hashlib.sha1(out.encode("utf-8", "replace")).hexdigest()[:12] if rc == 0 else ""
@@ -137,6 +151,7 @@ class LocalEnv(GitHelpers):
         self.extra_env = extra_env or {}
         self.max_output_chars = max_output_chars
         self._shim_dir: str | None = None
+        self.record_start()
 
     # ----- command execution -----
     def execute(self, command: str, timeout_s: int | None = None) -> Obs:

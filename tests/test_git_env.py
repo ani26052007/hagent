@@ -45,3 +45,34 @@ def test_local_env_git_and_commands_ignore_inherited_git_variables(tmp_path, mon
     assert lines[0] == str(repo.resolve()) and lines[-1] == "no-git-dir"
     env.execute("git add -A")
     assert _files(other) == before
+
+
+def test_patch_keeps_changes_the_agent_committed(tmp_path):
+    """vla-router ISSUES #56: the patch is the change since the starting commit, not since HEAD."""
+    repo = _repo(tmp_path / "repo", "one\n")
+    env = LocalEnv(repo)
+    assert env.git_diff() == "" and env._start_commit
+    env.execute("echo two > a.txt && git add -A && git -c user.name=a -c user.email=a@a commit -qm agent "
+                "&& echo three > b.txt")
+    diff = env.git_diff()
+    assert "+two" in diff and "+three" in diff and "b.txt" in diff        # committed edit and new file
+    env.execute("git -c user.name=a -c user.email=a@a commit -qam more")
+    assert "+two" in env.git_diff()
+    assert "+two" not in LocalEnv(repo).git_diff()                         # a new env starts from the new HEAD
+
+
+def test_tracked_diff_hash_sees_committed_edits(tmp_path):
+    repo = _repo(tmp_path / "repo", "one\n")
+    env = LocalEnv(repo)
+    before = env.git_tracked_diff_hash()
+    env.execute("echo two > a.txt && git -c user.name=a -c user.email=a@a commit -qam agent")
+    assert env.git_tracked_diff_hash() != before
+
+
+def test_repo_without_commits_still_diffs(tmp_path):
+    root = tmp_path / "empty"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True, capture_output=True)
+    env = LocalEnv(root)
+    (root / "x.txt").write_text("hello\n")
+    assert env._start_commit is None and "+hello" in env.git_diff()

@@ -76,6 +76,7 @@ class DockerEnv(GitHelpers):
         if not shutil.which(self.rt):
             raise EnvError(f"container runtime {self.rt!r} not found on PATH")
         self._start(repo_path)
+        self.record_start()
 
     # ------------------------------------------------------------------ lifecycle
     def _run_cli(self, *args: str, timeout: int | None = None, check: bool = True,
