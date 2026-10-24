@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, Sequence
+from typing import TYPE_CHECKING, Mapping, Protocol, Sequence
 
 if TYPE_CHECKING:
     from .config import CustomCommand
@@ -31,6 +31,13 @@ _ENV_DEFAULTS = {
     "PIP_PROGRESS_BAR": "off",
     "PYTHONDONTWRITEBYTECODE": "1",  # keep __pycache__ out of the diff
 }
+
+
+def clean_environ(base: Mapping[str, str] | None = None) -> dict[str, str]:
+    """`base` (default: os.environ) without any GIT_* variable. An inherited GIT_DIR, GIT_WORK_TREE,
+    GIT_INDEX_FILE or GIT_CONFIG_* would point git (the helpers and the agent's own commands) at
+    another repository, or change what git prints."""
+    return {k: v for k, v in (os.environ if base is None else base).items() if not k.startswith("GIT_")}
 
 
 @dataclass
@@ -134,7 +141,7 @@ class LocalEnv(GitHelpers):
     # ----- command execution -----
     def execute(self, command: str, timeout_s: int | None = None) -> Obs:
         timeout = timeout_s or self.timeout_s
-        env = os.environ | _ENV_DEFAULTS | self.extra_env
+        env = clean_environ() | _ENV_DEFAULTS | self.extra_env
         proc = subprocess.Popen(
             command,
             shell=True,
@@ -191,7 +198,7 @@ class LocalEnv(GitHelpers):
     def _git(self, *args: str, timeout: int = 30) -> tuple[int, str]:
         try:
             p = subprocess.run(["git", *args], cwd=self.cwd, capture_output=True, text=True,
-                               errors="replace", timeout=timeout)
+                               errors="replace", timeout=timeout, env=clean_environ())
         except (OSError, subprocess.TimeoutExpired):
             return 1, ""
         return p.returncode, p.stdout

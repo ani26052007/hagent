@@ -8,6 +8,8 @@ Isolation model
     2 CPUs, 4 GB, 512 pids, no-new-privileges).
   - One long-lived container per env (`sleep infinity`); every command is a separate
     `docker exec`, so no shell state survives between commands, as with LocalEnv.
+  - The container only gets the variables passed with `-e`. Host-side runtime calls run with
+    `clean_environ()` (no inherited GIT_* variables), like LocalEnv.
 
 Timeouts kill the whole process tree, in three layers:
   1. In the container, the command runs under `timeout -s KILL <t>`. Without --foreground,
@@ -32,7 +34,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .config import CustomCommand, EnvConfig
-from .env import _ENV_DEFAULTS, GitHelpers, Obs, shim_script, submission_of
+from .env import _ENV_DEFAULTS, GitHelpers, Obs, clean_environ, shim_script, submission_of
 from .exceptions import EnvError
 from .textutil import truncate_middle
 
@@ -80,7 +82,7 @@ class DockerEnv(GitHelpers):
                  input_text: str | None = None) -> subprocess.CompletedProcess:
         try:
             p = subprocess.run([self.rt, *args], capture_output=True, text=True, errors="replace",
-                               timeout=timeout or self.cfg.startup_timeout_s, input=input_text)
+                               timeout=timeout or self.cfg.startup_timeout_s, input=input_text, env=clean_environ())
         except (OSError, subprocess.TimeoutExpired) as e:
             raise EnvError(f"{self.rt} {args[0]} failed: {e!r}") from e
         if check and p.returncode != 0:
@@ -117,7 +119,7 @@ class DockerEnv(GitHelpers):
         cid, self.container = self.container, None
         if cid:
             try:
-                subprocess.run([self.rt, "rm", "-f", cid], capture_output=True, timeout=60)
+                subprocess.run([self.rt, "rm", "-f", cid], capture_output=True, timeout=60, env=clean_environ())
             except (OSError, subprocess.TimeoutExpired):
                 pass
 
@@ -151,7 +153,7 @@ class DockerEnv(GitHelpers):
         t0 = time.monotonic()
         proc = subprocess.Popen(self._exec_argv(script, env), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
-                                start_new_session=True)
+                                start_new_session=True, env=clean_environ())
         timed_out = False
         try:
             out, _ = proc.communicate(timeout=timeout + self.cfg.kill_grace_s)
@@ -176,7 +178,8 @@ class DockerEnv(GitHelpers):
             "done < \"$d/environ\" 2>/dev/null; done; true"
         )
         try:
-            subprocess.run(self._exec_argv(script, {}, user="0"), capture_output=True, timeout=30)
+            subprocess.run(self._exec_argv(script, {}, user="0"), capture_output=True, timeout=30,
+                           env=clean_environ())
         except (OSError, subprocess.TimeoutExpired, EnvError):
             pass
 
@@ -206,7 +209,7 @@ class DockerEnv(GitHelpers):
         script = "exec git " + " ".join(shlex.quote(a) for a in args)
         try:
             p = subprocess.run(self._exec_argv(script, dict(_GIT_SAFE_ENV)), capture_output=True, text=True,
-                               errors="replace", timeout=timeout, stdin=subprocess.DEVNULL)
+                               errors="replace", timeout=timeout, stdin=subprocess.DEVNULL, env=clean_environ())
         except (OSError, subprocess.TimeoutExpired):
             return 1, ""
         return p.returncode, p.stdout
