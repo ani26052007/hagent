@@ -17,7 +17,7 @@ from .agent import Agent, Usage
 from .config import Settings
 from .env import SUBMIT_MARKER, Obs
 from .models import Model
-from .prompts import build_explorer_prompt
+from .prompts import EXPLORER_FORMAT_ERROR, build_explorer_prompt
 from .textutil import truncate_middle
 
 _REDIRECT_OK = re.compile(r"\d?>&\d|&>\s*/dev/null|\d?>\s*/dev/null")
@@ -68,6 +68,7 @@ def run_explorer(question: str, env, model: Model, settings: Settings) -> tuple[
     sub_settings = dataclasses.replace(settings, limits=lim)
     before = env.git_diff_hash()
     agent = Agent(model, ReadOnlyEnv(env), sub_settings, role="explorer", system_prompt=build_explorer_prompt(env.cwd))
+    agent.format_error_template = EXPLORER_FORMAT_ERROR
     result = agent.run(question)
     modified = env.git_diff_hash() != before
 

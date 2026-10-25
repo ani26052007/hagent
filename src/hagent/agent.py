@@ -21,7 +21,7 @@ from .config import Settings
 from .env import Obs
 from .exceptions import AgentExit, FormatError, ModelError
 from .models import USAGE_API, Model, Reply
-from .prompts import FORMAT_ERROR, TASK_TEMPLATE, build_system_prompt
+from .prompts import FORMAT_ERROR, TASK_TEMPLATE, TRUNCATED_REPLY, build_system_prompt
 from .textutil import parse_action, truncate_middle
 
 TEST_CMD_RE = re.compile(
@@ -95,6 +95,7 @@ class Agent:
         self.format_errors = 0
         self.last_test_output = ""
         self.last_role = role
+        self.format_error_template = FORMAT_ERROR  # the explorer swaps in its own (it submits differently)
         self._t0 = time.time()
 
     # ------------------------------------------------------------------ messages
@@ -188,7 +189,7 @@ class Agent:
                 if 0 < cap <= self.format_errors:
                     status, detail = "RepeatedFormatError", str(e)
                     break
-                self.inject(FORMAT_ERROR.replace("<<DETAIL>>", str(e)))
+                self.inject(self.format_error_template.replace("<<DETAIL>>", str(e)))
             except AgentExit as e:
                 status, detail = e.status, e.detail
                 break
@@ -211,7 +212,12 @@ class Agent:
 
     def step(self) -> None:
         reply = self.query()
-        command = parse_action(reply.content)  # raises FormatError
+        try:
+            command = parse_action(reply.content)
+        except FormatError as e:
+            if getattr(reply, "finish_reason", "") == "length":  # cut off at max_tokens: say so
+                raise FormatError(TRUNCATED_REPLY.format(detail=str(e).rstrip("."))) from e
+            raise
         obs = self.run_command(command)
         self.add("user", format_observation(obs, self.observation_limit(command)))
         if obs.submission is not None:
@@ -260,7 +266,8 @@ class Agent:
             self.account(role, reply)
             return reply.content
 
-        if maybe_compact(self.messages, summarize, lim.ctx_char_limit, lim.keep_last_messages):
+        if maybe_compact(self.messages, summarize, lim.ctx_char_limit, lim.keep_last_messages,
+                         state=self.env.git_diff):
             self.n_compactions += 1
             self.log.info("history compacted (%d so far)", self.n_compactions)
 

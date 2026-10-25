@@ -204,6 +204,58 @@ def test_compaction_survives_summarizer_failure():
     assert "echo" in msgs[1]["content"] and _roles_ok(msgs)
 
 
+COPIED = "[AGENT]\nLet me fix it\n```bash\nsed -i 's/a/b/' x.py\n```\n[OUTPUT]\n<returncode>0</returncode>"
+
+
+@pytest.mark.parametrize("bad", ["", "   ", COPIED, "word " * 600,
+                                 "notes\n```\na\n```\n```\nb\n```\n"])
+def test_unusable_summary_is_replaced_by_fallback(bad):
+    msgs = _history(30)
+    assert maybe_compact(msgs, lambda t, p: bad, 5000, keep_last=6)
+    notes = msgs[1]["content"].partition(SUMMARY_MARK)[2]
+    assert "Automatic summary unavailable" in notes and "[AGENT]" not in notes
+    assert "echo" in notes and _roles_ok(msgs)
+
+
+def test_valid_summary_is_kept_and_single_fence_pair_dropped():
+    msgs = _history(30)
+    good = "FILES: x.py:f\n```\nreturn a\n```\nNEXT: edit f"
+    assert maybe_compact(msgs, lambda t, p: good, 5000, keep_last=6)
+    notes = msgs[1]["content"].partition(SUMMARY_MARK)[2]
+    assert "FILES: x.py:f" in notes and "return a" in notes and "```" not in notes
+
+
+def test_state_section_shows_diff_and_is_not_fed_back():
+    from hagent.compaction import STATE_MARK
+    diff = "diff --git a/pkg/m.py b/pkg/m.py\n--- a/pkg/m.py\n+++ b/pkg/m.py\n@@ -1 +1 @@\n-a\n+b\n"
+    msgs = _history(30)
+    maybe_compact(msgs, lambda t, p: "FIRST", 5000, keep_last=6, state=lambda: diff)
+    content = msgs[1]["content"]
+    assert STATE_MARK in content and "pkg/m.py" in content and "+b" in content
+    seen = {}
+    msgs += _history(30)[2:]
+    maybe_compact(msgs, lambda t, p: seen.setdefault("prev", p) and "SECOND", 5000, keep_last=6,
+                  state=lambda: "")
+    assert "FIRST" in seen["prev"] and STATE_MARK not in seen["prev"] and "+b" not in seen["prev"]
+    content = msgs[1]["content"]
+    assert content.count(STATE_MARK) == 1 and "No files have been changed yet" in content and "+b" not in content
+
+
+def test_failing_state_never_kills_compaction():
+    def boom():
+        raise RuntimeError("git gone")
+
+    msgs = _history(30)
+    assert maybe_compact(msgs, lambda t, p: "NOTES", 5000, keep_last=6, state=boom)
+    assert "NOTES" in msgs[1]["content"] and _roles_ok(msgs)
+
+
+def test_fallback_caps_previous_notes():
+    from hagent.compaction import fallback_summary
+    out = fallback_summary([{"role": "assistant", "content": "```bash\nls\n```"}], "p" * 20_000)
+    assert len(out) < 4000 and "- ls" in out
+
+
 # ---------------------------------------------------------------- helpers / config
 def test_parse_verdict():
     assert parse_verdict("APPROVE\nlooks good").ok
@@ -353,3 +405,11 @@ def test_openai_model_estimates_tokens_when_usage_missing(server):
     _Handler.responses = [(200, {"choices": [{"message": {"content": "x" * 400}}]})]
     r = m.query([{"role": "user", "content": "y" * 4000}])
     assert r.input_tokens == 1000 and r.output_tokens == 100
+
+
+def test_openai_model_reports_finish_reason(server):
+    m = OpenAICompatModel(ModelConfig(model="m", base_url=server, api_key_env=""))
+    _Handler.responses = [(200, {"choices": [{"message": {"content": "```bash\nls"}, "finish_reason": "length"}]}),
+                          _ok("fine")]
+    assert m.query([{"role": "user", "content": "x"}]).finish_reason == "length"
+    assert m.query([{"role": "user", "content": "x"}]).finish_reason == ""

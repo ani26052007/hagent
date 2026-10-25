@@ -6,6 +6,7 @@ import pytest
 
 from conftest import FIX, SUBMIT
 from hagent import Agent, HybridAgent, LocalEnv, solve
+from hagent.prompts import build_system_prompt
 from hagent.env import SUBMIT_MARKER
 from hagent.exceptions import ModelError
 from hagent.explorer import ReadOnlyEnv, is_write_command
@@ -105,13 +106,15 @@ def test_compaction_inside_agent_loop(repo, mk_settings):
         return bash("python -c \"print('o' * 500)\"")
 
     model = ScriptedModel([small], repeat_last=True)
-    agent = Agent(model, LocalEnv(repo), mk_settings(max_steps=25, ctx_char_limit=4000, keep_last_messages=4))
+    env = LocalEnv(repo)
+    budget = len(build_system_prompt(env.cwd)) + 2500  # room for history beyond the fixed system prompt
+    agent = Agent(model, env, mk_settings(max_steps=25, ctx_char_limit=budget, keep_last_messages=4))
     r = agent.run("x")
     assert agent.n_compactions >= 1 and r.exit_status == "LimitsExceeded"
     assert "NOTES: looked around a lot" in agent.messages[1]["content"]
     assert roles_alternate(agent.messages)
     peak = max(sum(len(m["content"]) for m in call) for call in model.calls)
-    assert peak < 4000 + 1500  # the history never grows far beyond the budget
+    assert peak < budget + 1500  # the history never grows far beyond the budget
 
 
 # ================================================================ hybrid agent
@@ -260,3 +263,28 @@ def test_token_limit_stops_run(repo, mk_settings):
     model = ScriptedModel([bash("echo x")], repeat_last=True)
     r = Agent(model, LocalEnv(repo), mk_settings(max_steps=100, max_total_tokens=1500)).run("x")
     assert r.exit_status == "LimitsExceeded" and "token limit" in r.detail and r.steps < 100
+
+
+def test_prose_only_reply_gets_the_submit_command(repo, mk_settings):
+    """A model that announces it is done without a command is told exactly how to submit."""
+    model = ScriptedModel([FIX, "The fix is complete and verified.", SUBMIT])
+    r = Agent(model, LocalEnv(repo), mk_settings()).run("fix add")
+    assert r.exit_status == "Submitted"
+    feedback = model.calls[2][-1]["content"]
+    assert "Format error" in feedback and f"echo {SUBMIT_MARKER} && git add -A && git diff --cached" in feedback
+
+
+def test_cut_off_reply_is_reported_as_truncated(repo, mk_settings):
+
+    class CutOff(ScriptedModel):
+        def query(self, messages):
+            reply = super().query(messages)
+            if len(self.calls) == 1:
+                reply.finish_reason = "length"
+            return reply
+
+    model = CutOff(["Writing the file\n```bash\ncat > big.py <<'EOF'\nx = 1", FIX, SUBMIT])
+    r = Agent(model, LocalEnv(repo), mk_settings()).run("fix add")
+    assert r.exit_status == "Submitted"
+    feedback = model.calls[1][-1]["content"]
+    assert "cut off" in feedback and "never closed" in feedback

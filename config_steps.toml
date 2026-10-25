@@ -1,0 +1,60 @@
+[small]            # drives almost every step: fast and cheap
+model = "nvidia/Nemotron-3_5-Lightning"
+base_url = "https://api.tokenfactory.nebius.com/v1/"
+api_key_env = "NEBIUS_API_KEY"
+temperature = 0.0
+max_tokens = 2048
+price_in_per_mtok = 0.06
+price_out_per_mtok = 0.24
+extra_body = { chat_template_kwargs = { enable_thinking = false } }
+
+[big]              # consulted rarely: planning, stuck advice, final review
+model = "nvidia/Nemotron-3-Ultra-550b-a55b"
+base_url = "https://api.tokenfactory.nebius.com/v1/"
+api_key_env = "NEBIUS_API_KEY"
+temperature = 0.0
+max_tokens = 3000
+price_in_per_mtok = 1.00
+price_out_per_mtok = 3.00
+
+[limits]
+max_steps = 200
+max_cost = 1
+max_total_tokens = 2000000
+max_wall_s = 1800
+cmd_timeout_s = 180
+max_format_errors = 3
+
+obs_max_chars = 3000
+ctx_char_limit = 60000
+keep_last_messages = 10
+
+max_big_calls = 12
+plan_at_step = 8
+takeover_steps = 3
+final_review = true
+max_review_rejections = 2
+
+window = 8
+repeat_threshold = 3
+stall_warmup = 10
+stall_steps = 12
+max_strikes = 5
+
+enable_explorer = false
+max_explorer_calls = 3
+explorer_max_steps = 12
+explorer_max_cost = 0.10
+
+[env]
+backend = "local"
+runtime = "docker"
+image = ""
+network = "none"
+cpus = 2.0
+memory = "4g"
+pids_limit = 512
+workdir = "/workspace/repo"
+user = ""
+kill_grace_s = 10
+startup_timeout_s = 120

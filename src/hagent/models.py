@@ -28,6 +28,7 @@ class Reply:
     output_tokens: int = 0
     cost: float = 0.0
     usage_source: str = USAGE_ESTIMATED
+    finish_reason: str = ""  # provider's finish_reason; "length" means the reply was cut off at max_tokens
 
 
 def _first_int(usage: dict, *keys: str) -> int | None:
@@ -127,7 +128,9 @@ class OpenAICompatModel:
             raise ModelError(f"[{self.name}] failed after {self.max_retries} attempts: {last_err}")
 
         try:
-            raw_content = payload["choices"][0]["message"].get("content") or ""
+            choice = payload["choices"][0]
+            raw_content = choice["message"].get("content") or ""
+            finish_reason = str(choice.get("finish_reason") or "")
         except (KeyError, IndexError, TypeError, AttributeError) as e:
             raise ModelError(f"[{self.name}] unexpected response shape: {str(payload)[:300]}") from e
         content = _THINK.sub("", raw_content).strip()  # some reasoning models inline their thoughts
@@ -135,7 +138,7 @@ class OpenAICompatModel:
         # read the raw content length for estimates before <think> stripping would undercount output
         tin, tout, source = read_usage(payload, messages, raw_content)
         cost = tin * cfg.price_in_per_mtok / 1e6 + tout * cfg.price_out_per_mtok / 1e6
-        return Reply(content, tin, tout, cost, source)
+        return Reply(content, tin, tout, cost, source, finish_reason)
 
 
 ScriptItem = "str | Callable[[list[dict]], str]"
