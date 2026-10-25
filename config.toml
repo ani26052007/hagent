@@ -3,7 +3,7 @@ model = "nvidia/Nemotron-3_5-Lightning"
 base_url = "https://api.tokenfactory.nebius.com/v1/"
 api_key_env = "NEBIUS_API_KEY"
 temperature = 0.0
-max_tokens = 2048
+max_tokens = 4096
 price_in_per_mtok = 0.06
 price_out_per_mtok = 0.24
 extra_body = { chat_template_kwargs = { enable_thinking = false } }
