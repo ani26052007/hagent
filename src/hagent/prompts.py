@@ -96,8 +96,13 @@ FORMAT_ERROR = (
     "(untagged ``` blocks count as bash; ```python blocks are not run, so run Python inside the bash block "
     "with `python3 - <<'PY' ... PY`).\n"
     "If you think the task is finished, do NOT reply with a summary: a reply without a command does nothing "
-    "and the run continues. Finish by submitting, with exactly this reply:\n"
-    f"```bash\n{SUBMIT_COMMAND}\n```"
+    "and the run continues. Finish by submitting: put exactly this command, alone, in your one bash block: "
+    f"`{SUBMIT_COMMAND}`"
+)
+
+MULTI_BLOCK_NOTE = (
+    "[Note] Your reply had <<N>> bash blocks. Only the FIRST one was run; the others were ignored. "
+    "Send exactly one command per reply and wait for its output before the next."
 )
 
 EXPLORER_FORMAT_ERROR = (

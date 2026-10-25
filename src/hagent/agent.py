@@ -21,8 +21,8 @@ from .config import Settings
 from .env import Obs
 from .exceptions import AgentExit, FormatError, ModelError
 from .models import USAGE_API, Model, Reply
-from .prompts import FORMAT_ERROR, TASK_TEMPLATE, TRUNCATED_REPLY, build_system_prompt
-from .textutil import parse_action, truncate_middle
+from .prompts import FORMAT_ERROR, MULTI_BLOCK_NOTE, TASK_TEMPLATE, TRUNCATED_REPLY, build_system_prompt
+from .textutil import extract_bash_blocks, parse_action, truncate_middle
 
 TEST_CMD_RE = re.compile(
     r"\b(pytest|py\.test|unittest|tox|nosetests|npm (?:run )?test|yarn test|go test|cargo test|mvn test|gradle test|make test|ctest)\b"
@@ -212,14 +212,24 @@ class Agent:
 
     def step(self) -> None:
         reply = self.query()
-        try:
-            command = parse_action(reply.content)
-        except FormatError as e:
-            if getattr(reply, "finish_reason", "") == "length":  # cut off at max_tokens: say so
-                raise FormatError(TRUNCATED_REPLY.format(detail=str(e).rstrip("."))) from e
-            raise
+        note = ""
+        blocks, _ = extract_bash_blocks(reply.content)
+        if len(blocks) > 1 and blocks[0].strip():
+            # Several commands in one reply: run the first instead of failing the whole step.
+            # A strict rejection here repeated until the run died (RepeatedFormatError).
+            command = blocks[0].strip()
+            note = MULTI_BLOCK_NOTE.replace("<<N>>", str(len(blocks)))
+        else:
+            try:
+                command = parse_action(reply.content)
+            except FormatError as e:
+                if getattr(reply, "finish_reason", "") == "length":  # cut off at max_tokens: say so
+                    raise FormatError(TRUNCATED_REPLY.format(detail=str(e).rstrip("."))) from e
+                raise
         obs = self.run_command(command)
         self.add("user", format_observation(obs, self.observation_limit(command)))
+        if note:
+            self.inject(note)
         if obs.submission is not None:
             feedback = self.handle_submission(obs.submission)
             if feedback is None:

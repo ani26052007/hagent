@@ -288,3 +288,14 @@ def test_cut_off_reply_is_reported_as_truncated(repo, mk_settings):
     assert r.exit_status == "Submitted"
     feedback = model.calls[1][-1]["content"]
     assert "cut off" in feedback and "never closed" in feedback
+
+
+def test_multiple_blocks_run_the_first_and_warn(repo, mk_settings):
+    """Several commands in one reply: the first runs, the model is told, and the run continues."""
+    two = "Fix then submit.\n```bash\nsed -i 's/a - b/a + b/' app.py\n```\n```bash\necho should-not-run\n```"
+    model = ScriptedModel([two, SUBMIT])
+    r = Agent(model, LocalEnv(repo), mk_settings(max_format_errors=1)).run("fix add")
+    assert r.exit_status == "Submitted" and "+    return a + b" in r.patch
+    feedback = model.calls[1][-1]["content"]
+    assert "Only the FIRST one was run" in feedback and "should-not-run" not in feedback
+    assert roles_alternate(r.messages)
