@@ -21,13 +21,27 @@ from .config import Settings
 from .env import Obs
 from .exceptions import AgentExit, FormatError, ModelError
 from .models import USAGE_API, Model, Reply
-from .prompts import (BUDGET_ADVICE, BUDGET_NOTE, EDIT_NUDGE, FORMAT_ERROR, MULTI_BLOCK_NOTE, TASK_TEMPLATE,
+from .prompts import (BLOCKED_GIT, BUDGET_ADVICE, BUDGET_NOTE, EDIT_NUDGE, FORMAT_ERROR, MULTI_BLOCK_NOTE, TASK_TEMPLATE,
                       TRUNCATED_REPLY, build_system_prompt)
 from .textutil import extract_bash_blocks, parse_action, truncate_middle
 
 TEST_CMD_RE = re.compile(
     r"\b(pytest|py\.test|unittest|tox|nosetests|npm (?:run )?test|yarn test|go test|cargo test|mvn test|gradle test|make test|ctest)\b"
 )
+
+
+# git subcommands that rewrite history or hide edits. The patch is `git diff` against the start
+# commit, so `git stash` / `git reset --hard` silently throw the agent's work away (seen in runs).
+_BLOCKED_GIT = re.compile(
+    r"(?:^|[;&|(`\s])git\s+(?:-\S+\s+(?:\S+=\S*\s+)?)*"
+    r"(stash|reset|commit|clean|rebase|cherry-pick|revert|switch|merge)\b"
+)
+
+
+def blocked_git_command(command: str) -> str | None:
+    """The forbidden git subcommand used in `command` (e.g. "stash"), or None."""
+    m = _BLOCKED_GIT.search(command)
+    return m.group(1) if m else None
 
 
 WARN_STEPS_LEFT = (20, 8, 3)  # budget warnings are injected when this many steps remain
@@ -154,6 +168,9 @@ class Agent:
         self._maybe_compact()
 
     def run_command(self, command: str) -> Obs:
+        blocked = blocked_git_command(command)
+        if blocked:
+            return Obs(BLOCKED_GIT.replace("<<CMD>>", blocked), 1)
         return self.env.execute(command, self.limits.cmd_timeout_s)
 
     def on_observation(self, command: str, obs: Obs) -> None:

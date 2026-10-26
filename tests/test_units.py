@@ -423,3 +423,14 @@ def test_detector_reading_source_is_not_a_new_error():
     d2 = LoopDetector(window=8, repeat_threshold=3, stall_warmup=2, stall_steps=3)
     flags2 = [d2.observe(f"pytest t{i}", f"FAILED test_{i}.py::x - AssertionError {i}", "same") for i in range(6)]
     assert not any(f and f.startswith("stalled") for f in flags2)  # new failures still count as progress
+
+
+@pytest.mark.parametrize("cmd,hit", [
+    ("git stash", "stash"), ("cd /r && git stash pop", "stash"), ("git reset --hard HEAD", "reset"),
+    ("git -c user.name=x commit -m m", "commit"), ("ls; git clean -fd", "clean"), ("git checkout main && git rebase x", "rebase"),
+    ("git diff", None), ("git status", None), ("git checkout -- a.py", None), ("git log --oneline | head", None),
+    ("git add -A && git diff --cached", None), ("grep -rn 'reset' src/", None), ("python3 -c 'import git'", None),
+])
+def test_blocked_git_command(cmd, hit):
+    from hagent.agent import blocked_git_command
+    assert blocked_git_command(cmd) == hit

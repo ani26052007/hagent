@@ -114,6 +114,12 @@ EXPLORER_FORMAT_ERROR = (
     "marker command from your instructions; a reply without a command does nothing."
 )
 
+BLOCKED_GIT = (
+    "Blocked: `git <<CMD>>` is disabled here. It rewrites history or hides your edits, and your patch is taken "
+    "from the working tree, so your work would be lost. Nothing was run. Use `git diff` or `git status` to "
+    "inspect your changes; to throw away a broken edit to one file use `git checkout -- <file>`."
+)
+
 BUDGET_NOTE = (
     "[Budget] {left} steps left. {advice}"
 )

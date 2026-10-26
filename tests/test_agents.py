@@ -327,3 +327,10 @@ def test_last_budget_warning_says_submit_when_there_is_a_patch(repo, mk_settings
     users = [m["content"] for m in r.messages if m["role"] == "user"]
     assert any("[Budget] 3 steps left" in c and "Submit your best patch" in c for c in users)
     assert any("[Budget] 20 steps left" in c and "Run the relevant existing tests" in c for c in users)
+
+
+def test_git_stash_is_blocked_and_the_edit_survives(repo, mk_settings):
+    model = ScriptedModel([FIX, bash("git stash"), SUBMIT])
+    r = Agent(model, LocalEnv(repo), mk_settings()).run("fix add")
+    assert r.exit_status == "Submitted" and "+    return a + b" in r.patch
+    assert "Blocked: `git stash`" in model.calls[2][-1]["content"]
