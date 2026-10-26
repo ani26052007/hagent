@@ -47,17 +47,20 @@ PY
 
 ## Workflow
 1. Locate: grep for the names in the task and find the code to change.
-2. Find the closest existing example. When adding or changing a feature, find the most similar existing one in this repo (a sibling method, handler or option) and mirror its structure, names and return format. Never invent APIs, data formats or field names; look them up in the code, or in the installed packages.
-3. Find the existing tests for that code, e.g. `grep -rln "name_you_changed" tests/ | head`.
-4. Edit early: make your first edit by about step 20. Reading more code rarely helps after that; edit, test and iterate instead.
-5. Verify with the project's tests: `python -m pytest -x -q --tb=short path/to/test_file.py` (add `-k name` to narrow). A quick reproduction script is fine, but write it under /tmp, not in the repository.
-6. If an approach fails twice, change approach instead of repeating it.
-7. Examples in the task are examples, not the full specification. Fix the whole class of inputs the task describes ("special characters like -" means any special character, not only -), and check your fix on other cases than the one shown.
+2. Reproduce first: make the problem visible before you edit. Run the existing failing test, or write a minimal script under /tmp that shows the wrong output or error, and read what it actually says. Suggestions in the issue ("maybe change X to Y") are hypotheses: confirm them against the real behavior before applying them.
+3. Find the closest existing example. When adding or changing a feature, find the most similar existing one in this repo (a sibling method, handler or option) and mirror its structure, names and return format. Never invent APIs, data formats or field names; look them up in the code, or in the installed packages.
+4. Find the existing tests for that code, e.g. `grep -rln "name_you_changed" tests/ | head`.
+5. Edit early: make your first edit by about step 20. Reading more code rarely helps after that; edit, test and iterate instead.
+6. Verify with the project's tests: `python -m pytest -x -q --tb=short path/to/test_file.py` (add `-k name` to narrow), and re-run your reproduction.
+7. If an approach fails twice, change approach instead of repeating it.
+8. Examples in the task are examples, not the full specification. Fix the whole class of inputs the task describes ("special characters like -" means any special character, not only -), and check your fix on other cases than the one shown.
 
 ## Rules
 - Never run `git commit`, `git reset`, `git stash` or `git clean`. Use `git checkout -- <file>` only to throw away a broken edit to that one file.
 - Do not create backup files (.bak, .orig) or leave scratch files in the repository: everything in it becomes part of your patch.
 - Do not modify existing tests unless the task asks for it.
+- Make only the change the task asks for. Do not remove, rename or restructure things the task does not name (if asked to remove an option, remove that option, not the features around it).
+- Packages cannot be installed (there is no network). Never run pip or conda install. If a shell command contains > or <, quote it, e.g. 'pkg>=1.0', or the shell creates a stray file.
 
 ## Submitting
 When the relevant tests pass after your last edit, run `git status` and remove any scratch files you created in the repository. Then submit with exactly this command (nothing else in the block):
@@ -109,6 +112,19 @@ EXPLORER_FORMAT_ERROR = (
     "Format error: <<DETAIL>>.\n"
     "Reply with 1-2 sentences and exactly ONE ```bash block. When you know the answer, report it with the "
     "marker command from your instructions; a reply without a command does nothing."
+)
+
+BUDGET_NOTE = (
+    "[Budget] {left} steps left. {advice}"
+)
+BUDGET_ADVICE = {
+    "noedit": "You have not edited any file yet: make your best edit now, run the relevant tests, and submit.",
+    "test": "Run the relevant existing tests now and submit; a partial but working fix is better than none.",
+    "submit": "Submit your best patch now (the submit command in your instructions); unsubmitted work may be lost.",
+}
+EDIT_NUDGE = (
+    "[Progress] You have used {n} steps without editing any file. Stop reading. Pick the most likely place, "
+    "make your best attempt at the fix now, then run the relevant tests and refine."
 )
 
 TRUNCATED_REPLY = ("your reply was cut off because it reached the output length limit ({detail}). "

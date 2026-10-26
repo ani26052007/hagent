@@ -413,3 +413,13 @@ def test_openai_model_reports_finish_reason(server):
                           _ok("fine")]
     assert m.query([{"role": "user", "content": "x"}]).finish_reason == "length"
     assert m.query([{"role": "user", "content": "x"}]).finish_reason == ""
+
+
+def test_detector_reading_source_is_not_a_new_error():
+    d = LoopDetector(window=8, repeat_threshold=3, stall_warmup=2, stall_steps=3)
+    flags = [d.observe(f"sed -n '{i},{i+9}p' t.py", f"assert x\nraise AssertionError  # line {i}", "same",
+                       is_test_or_failure=False) for i in range(6)]
+    assert any(f and f.startswith("stalled") for f in flags)
+    d2 = LoopDetector(window=8, repeat_threshold=3, stall_warmup=2, stall_steps=3)
+    flags2 = [d2.observe(f"pytest t{i}", f"FAILED test_{i}.py::x - AssertionError {i}", "same") for i in range(6)]
+    assert not any(f and f.startswith("stalled") for f in flags2)  # new failures still count as progress

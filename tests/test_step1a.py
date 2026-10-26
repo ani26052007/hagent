@@ -290,3 +290,10 @@ def test_solve_end_to_end_in_docker(repo, mk_settings):
     assert result.submitted and "+    return a + b" in result.patch
     assert (repo / "app.py").read_text() == "def add(a, b):\n    return a - b\n"  # original untouched
     assert result.reviews[0]["pass_probability"] == 0.7
+
+
+def test_system_prompt_workflow_rules():
+    p = build_system_prompt("/r")
+    for needle in ("Reproduce first", "hypotheses", "Make only the change the task asks for", "Never run pip or conda install"):
+        assert needle in p
+    assert p.count("```bash") >= 2 and "<<" not in p.replace("<<'PY'", "").replace("<<'EOF'", "")

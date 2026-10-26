@@ -34,6 +34,8 @@ class Limits:
     cmd_timeout_s: int = 60
     max_format_errors: int = 3  # consecutive
 
+    edit_nudge_step: int = 25  # if no file has been edited after this many steps, tell the model to edit now; 0 disables
+
     # --- token control ---
     obs_max_chars: int = 3000  # per command output shown to the model
     ctx_char_limit: int = 60000  # compact history above this (~15k tokens); 0 disables

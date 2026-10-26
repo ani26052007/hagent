@@ -20,7 +20,7 @@ price_out_per_mtok = 3.00
 [limits]
 max_steps = 80
 max_cost = 1
-max_total_tokens = 2000000
+max_total_tokens = 6000000
 max_wall_s = 1800
 cmd_timeout_s = 180
 max_format_errors = 3

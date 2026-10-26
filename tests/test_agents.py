@@ -299,3 +299,31 @@ def test_multiple_blocks_run_the_first_and_warn(repo, mk_settings):
     feedback = model.calls[1][-1]["content"]
     assert "Only the FIRST one was run" in feedback and "should-not-run" not in feedback
     assert roles_alternate(r.messages)
+
+
+def test_budget_warnings_and_edit_nudge(repo, mk_settings):
+    model = ScriptedModel([bash("echo looking")], repeat_last=True)
+    agent = Agent(model, LocalEnv(repo), mk_settings(max_steps=40, edit_nudge_step=5))
+    r = agent.run("x")
+    assert r.exit_status == "LimitsExceeded"
+    users = [m["content"] for m in r.messages if m["role"] == "user"]
+    assert any("without editing any file" in c for c in users)
+    assert sum("[Budget] 20 steps left" in c for c in users) == 1
+    assert any("[Budget] 8 steps left" in c and "not edited" in c for c in users)
+    assert any("[Budget] 3 steps left" in c for c in users)
+    assert roles_alternate(r.messages)
+
+
+def test_no_edit_nudge_after_an_edit(repo, mk_settings):
+    model = ScriptedModel([FIX] + [bash("echo more")] * 10 + [SUBMIT])
+    r = Agent(model, LocalEnv(repo), mk_settings(max_steps=60, edit_nudge_step=4)).run("fix add")
+    assert r.exit_status == "Submitted"
+    assert not any("without editing" in m["content"] for m in r.messages if m["role"] == "user")
+
+
+def test_last_budget_warning_says_submit_when_there_is_a_patch(repo, mk_settings):
+    model = ScriptedModel([FIX] + [bash("echo more")], repeat_last=True)
+    r = Agent(model, LocalEnv(repo), mk_settings(max_steps=40, edit_nudge_step=0)).run("fix add")
+    users = [m["content"] for m in r.messages if m["role"] == "user"]
+    assert any("[Budget] 3 steps left" in c and "Submit your best patch" in c for c in users)
+    assert any("[Budget] 20 steps left" in c and "Run the relevant existing tests" in c for c in users)

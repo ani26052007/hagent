@@ -18,7 +18,7 @@ from __future__ import annotations
 import shlex
 
 from . import helpers
-from .agent import Agent, Usage
+from .agent import TEST_CMD_RE, Agent, Usage
 from .compaction import split_summary
 from .config import Settings
 from .detector import LoopDetector
@@ -78,7 +78,8 @@ class HybridAgent(Agent):
     def on_observation(self, command: str, obs: Obs) -> None:
         super().on_observation(command, obs)
         flag = self.detector.observe(
-            command, obs.output, self.env.git_diff_hash(), self.env.git_tracked_diff_hash()
+            command, obs.output, self.env.git_diff_hash(), self.env.git_tracked_diff_hash(),
+            is_test_or_failure=bool(TEST_CMD_RE.search(command)) or obs.returncode != 0,
         )
         if flag:
             self.pending_flag = flag

@@ -21,12 +21,16 @@ from .config import Settings
 from .env import Obs
 from .exceptions import AgentExit, FormatError, ModelError
 from .models import USAGE_API, Model, Reply
-from .prompts import FORMAT_ERROR, MULTI_BLOCK_NOTE, TASK_TEMPLATE, TRUNCATED_REPLY, build_system_prompt
+from .prompts import (BUDGET_ADVICE, BUDGET_NOTE, EDIT_NUDGE, FORMAT_ERROR, MULTI_BLOCK_NOTE, TASK_TEMPLATE,
+                      TRUNCATED_REPLY, build_system_prompt)
 from .textutil import extract_bash_blocks, parse_action, truncate_middle
 
 TEST_CMD_RE = re.compile(
     r"\b(pytest|py\.test|unittest|tox|nosetests|npm (?:run )?test|yarn test|go test|cargo test|mvn test|gradle test|make test|ctest)\b"
 )
+
+
+WARN_STEPS_LEFT = (20, 8, 3)  # budget warnings are injected when this many steps remain
 
 
 @dataclass
@@ -237,6 +241,18 @@ class Agent:
             self.inject(feedback)
             return
         self.on_observation(command, obs)
+        self._progress_notes()
+
+    def _progress_notes(self) -> None:
+        """Tell the model how much budget is left, and nudge it to edit if it only reads."""
+        lim = self.limits
+        if lim.edit_nudge_step and self.n_steps == lim.edit_nudge_step and not self.env.git_diff().strip():
+            self.inject(EDIT_NUDGE.format(n=self.n_steps))
+        if lim.max_steps > 0:
+            left = lim.max_steps - self.n_steps
+            if left in WARN_STEPS_LEFT and lim.max_steps >= 2 * WARN_STEPS_LEFT[0]:
+                kind = "noedit" if not self.env.git_diff().strip() else ("test" if left > WARN_STEPS_LEFT[-1] else "submit")
+                self.inject(BUDGET_NOTE.format(left=left, advice=BUDGET_ADVICE[kind]))
 
     def query(self) -> Reply:
         self.before_query()

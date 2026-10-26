@@ -33,7 +33,8 @@ class LoopDetector:
         self.last_diff: str | None = None
         self.progress = False  # True if the latest observation was genuinely new
 
-    def observe(self, command: str, output: str, diff_hash: str, tracked_hash: str | None = None) -> str | None:
+    def observe(self, command: str, output: str, diff_hash: str, tracked_hash: str | None = None,
+                is_test_or_failure: bool = True) -> str | None:
         """Record one executed command. Returns a human-readable flag reason, or None.
 
         diff_hash is the full repo state (new files included) and drives repeat/progress detection.
@@ -44,7 +45,9 @@ class LoopDetector:
         out_key = (short_hash(output), diff_hash)
         self.window.append((cmd_key, out_key))
 
-        sig = failure_signature(output)
+        # Reading source or test files (sed/cat/grep) often prints words like ERROR or AssertionError.
+        # That is not a new failure, so only test runs and failing commands can count as one.
+        sig = failure_signature(output) if is_test_or_failure else None
         novel_diff = diff_hash not in self.seen_diffs
         tracked = diff_hash if tracked_hash is None else tracked_hash
         revisit = tracked in self.seen_tracked and tracked != self.last_tracked
