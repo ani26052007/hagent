@@ -39,7 +39,7 @@ window = 8
 repeat_threshold = 3
 stall_warmup = 10
 stall_steps = 12
-max_strikes = 5
+max_strikes = 1000
 
 enable_explorer = false
 max_explorer_calls = 3
